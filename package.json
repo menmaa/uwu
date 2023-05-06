@@ -1,0 +1,20 @@
+{
+  "name": "uwu",
+  "version": "1.0.0",
+  "description": "Innovative file packaging technology UwU",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/menmaa/uwu.git"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Menma",
+  "license": "ISC",
+  "devDependencies": {
+    "eslint": "^8.40.0",
+    "eslint-config-google": "^0.14.0"
+  }
+}
