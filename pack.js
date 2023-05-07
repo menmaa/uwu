@@ -71,8 +71,10 @@ async function pack(srcDir, dstDir, options) {
 
       dst.fileList.push({
         filePath: path.relative(srcDir, src.file),
-        offset: dst.size,
-        size: bytesRead,
+        fileOffset: srcRead,
+        fileSize: src.size,
+        packageOffset: dst.size,
+        packageSize: bytesRead,
       });
       dst.size += bytesRead;
       srcRead += bytesRead;
