@@ -11,5 +11,5 @@ declare module "uwu" {
      * @param {string} dstDir The destination directory.
      * @param {PackOptions} options `PackOptions` options.
      */
-    function pack(srcDir: string, dstDir: string, options?: PackOptions) : Promise<undefined>;
+    function pack(srcDir: string, dstDir: string, options?: PackOptions) : Promise<void>;
 }

@@ -96,7 +96,7 @@ async function pack(srcDir, dstDir, options) {
       srcRead += bytesRead;
 
       if (dst.size === options.maxPartSize) {
-        await closeFilePart(dst, dstPath);
+        await closeFilePart(dst, dstPath, options.compress);
         partNumber = (result.fileList.length + 1).toString().padStart(3, '0');
         dst = {
           name: options.outputNameFormat.replace('%d', partNumber),
@@ -119,7 +119,7 @@ async function pack(srcDir, dstDir, options) {
     }
   }
 
-  await closeFilePart(dst, dstPath);
+  await closeFilePart(dst, dstPath, options.compress);
   result.parts = result.fileList.length;
 
   const metadataPath = path.join(
