@@ -1,6 +1,8 @@
 # UwU File Packer (.uwu)
 
 A simple typescript file packer. Formerly used by a game launcher for large game file patching.
+Its main purpose was to pack thousands of files into a single one, split in 500 MiB parts.
+Generates a JSON compressed file that can be used for unpacking in code.
 
 ## Usage
 
