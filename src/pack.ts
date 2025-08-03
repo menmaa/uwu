@@ -193,7 +193,7 @@ function* getFilesRecursively(dir: string): Generator<{ file: string; size: numb
   }
 }
 
-export function packFile(srcDir: string, dstDir: string, options?: PackingOptions): Promise<PackingResult> {
+export function packDir(srcDir: string, dstDir: string, options?: PackingOptions): Promise<PackingResult> {
   const packer = new FilePacker(options);
   return packer.pack(srcDir, dstDir);
 }
