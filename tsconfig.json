@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "module": "nodenext",
+        "target": "esnext",
+        "types": ["node"],
+        "rootDir": "./src",
+        "outDir": "./dist",
+        "declaration": true,
+        "sourceMap": true,
+        "esModuleInterop": true,
+        "strict": true,
+        "skipLibCheck": true
+    },
+    "include": ["src/**/*"]
+}
