@@ -2,14 +2,14 @@
   "name": "uwu",
   "version": "1.0.0",
   "description": "Innovative file packaging technology UwU",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
     "url": "https://github.com/menmaa/uwu.git"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc"
   },
   "author": "Menma",
   "license": "ISC",
