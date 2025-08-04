@@ -36,6 +36,16 @@ export type PackingResult = {
   fileList: DestinationEntry[];
 };
 
+export type SourceFile = {
+  path: string;
+  size: number;
+};
+
+type CurrentProcessingEntry = Omit<DestinationEntry, 'sha1'> & {
+  sha1: crypto.Hash;
+  path: string;
+};
+
 const defaultOptions: PackingOptions = {
   maxPartSize: Number.MAX_SAFE_INTEGER,
   outputNameFormat: '%d',
@@ -45,8 +55,13 @@ const defaultOptions: PackingOptions = {
 class FilePacker {
   private result: PackingResult;
   private options: PackingOptions;
+  private curDest: CurrentProcessingEntry;
 
-  constructor(options?: Partial<PackingOptions>) {
+  constructor(
+    private srcDir: string,
+    private dstDir: string,
+    options: Partial<PackingOptions>
+  ) {
     this.result = {
       totalSize: 0,
       compressedSize: 0,
@@ -54,10 +69,7 @@ class FilePacker {
       fileList: [],
     };
 
-    this.options = Object.assign({}, defaultOptions);
-    if (options) {
-      Object.assign(this.options, options);
-    }
+    this.options = Object.assign({}, defaultOptions, options);
 
     if (!this.options.outputNameFormat?.includes('%d')) {
       throw new Error('Output name format missing \'%d\' placeholder.');
@@ -70,130 +82,146 @@ class FilePacker {
     if (!this.options.compress) {
       this.options.compress = false;
     }
+
+    this.curDest = this.initCurDst();
   }
 
-  async pack(srcDir: string, dstDir: string): Promise<PackingResult> {
-    if (!fs.existsSync(dstDir)) {
-      fs.mkdirSync(dstDir, { recursive: true });
+  async pack(): Promise<PackingResult> {
+    if (!fs.existsSync(this.dstDir)) {
+      fs.mkdirSync(this.dstDir, { recursive: true });
     }
 
-    let partNumber = (this.result.fileList.length + 1).toString().padStart(3, '0');
-    let hash = crypto.createHash('sha1');
-    let destEntry: Omit<DestinationEntry, 'sha1'> = {
-      name: this.options.outputNameFormat.replace('%d', partNumber),
-      size: 0,
-      compressed: this.options.compress,
-      fileList: []
-    };
-    let destPath = path.join(dstDir, destEntry.name);
-
-    for (const src of getFilesRecursively(srcDir)) {
-      console.log(`Writing file ${src.file}...`);
-      let srcRead = 0;
-
-      while (srcRead < src.size) {
-        const streamEnd = srcRead + Math.min(src.size, this.options.maxPartSize - destEntry.size);
-        let bytesRead = 0;
-
-        await pipeline(
-          fs.createReadStream(src.file, { start: srcRead, end: streamEnd - 1 }),
-          new stream.Transform({
-            transform(chunk, _, next) {
-              bytesRead += chunk.byteLength;
-              hash.update(chunk);
-              next(null, chunk);
-            },
-          }),
-          fs.createWriteStream(`${destPath}.tmp`, { flags: 'a+' }),
-        );
-
-        destEntry.fileList.push({
-          filePath: path.relative(srcDir, src.file),
-          fileOffset: srcRead,
-          fileSize: src.size,
-          packageOffset: destEntry.size,
-          packageSize: bytesRead,
-        });
-        destEntry.size += bytesRead;
-        srcRead += bytesRead;
-
-        if (destEntry.size === this.options.maxPartSize) {
-          const sha1 = hash.digest('hex');
-          await this.finalizePart({ sha1, ...destEntry }, destPath);
-
-          partNumber = (this.result.fileList.length + 1).toString().padStart(3, '0');
-          hash = crypto.createHash('sha1');
-          destEntry = {
-            name: this.options.outputNameFormat.replace('%d', partNumber),
-            size: 0,
-            compressed: this.options.compress,
-            fileList: []
-          };
-          destPath = path.join(dstDir, destEntry.name);
-        }
-      }
-
-      const sha1 = hash.digest('hex');
-      await this.finalizePart({ sha1, ...destEntry }, destPath);
-      this.result.parts = this.result.fileList.length;
-
-      const metadataPath = path.join(
-        dstDir, this.options.outputNameFormat.replace('%d', 'dat'),
-      );
-
-      await pipeline(
-        stream.Readable.from(JSON.stringify(this.result)),
-        zlib.createGzip({ level: 1 }),
-        fs.createWriteStream(metadataPath),
-      );
+    for (const src of getFilesRecursively(this.srcDir)) {
+      await this.processFile(src);
     }
+
+    await this.finalizePart(this.curDest);
+
+    this.result.parts = this.result.fileList.length;
+    const metadataPath = path.join(
+      this.dstDir, this.options.outputNameFormat.replace('%d', 'dat'),
+    );
+
+    await pipeline(
+      stream.Readable.from(JSON.stringify(this.result)),
+      zlib.createGzip({ level: 1 }),
+      fs.createWriteStream(metadataPath),
+    );
 
     return this.result;
   }
 
-  async finalizePart(dstEntry: DestinationEntry, filePath: string) {
-    if (dstEntry.compressed) {
-      const hash = crypto.createHash('sha1');
-      dstEntry.compressedSize = 0;
+  async processFile(srcFile: SourceFile) {
+    console.log(`Writing file ${srcFile.path}...`);
+    let totalBytesRead = 0;
 
-      console.log(`Compressing file ${filePath}...`);
+    while (totalBytesRead < srcFile.size) {
+      const streamEnd = totalBytesRead + Math.min(srcFile.size, this.options.maxPartSize - this.curDest.size);
+      let bytesRead = 0;
+
       await pipeline(
-        fs.createReadStream(`${filePath}.tmp`),
+        fs.createReadStream(srcFile.path, { start: totalBytesRead, end: streamEnd - 1 }),
+        new stream.Transform({
+          transform: (chunk, _, next) => {
+            bytesRead += chunk.byteLength;
+            this.curDest.sha1.update(chunk);
+            next(null, chunk);
+          },
+        }),
+        fs.createWriteStream(`${this.curDest.path}.tmp`, { flags: 'a+' }),
+      );
+
+      this.curDest.fileList.push({
+        filePath: path.relative(this.srcDir, srcFile.path),
+        fileOffset: totalBytesRead,
+        fileSize: srcFile.size,
+        packageOffset: this.curDest.size,
+        packageSize: bytesRead,
+      });
+      this.curDest.size += bytesRead;
+      totalBytesRead += bytesRead;
+
+      if (this.curDest.size === this.options.maxPartSize) {
+        await this.finalizePart(this.curDest);
+      }
+    }
+  }
+
+  async finalizePart(dstEntry: CurrentProcessingEntry) {
+    const finalEntry: DestinationEntry = {
+      name: dstEntry.name,
+      sha1: dstEntry.sha1.digest('hex'),
+      size: dstEntry.size,
+      compressed: dstEntry.compressed,
+      fileList: dstEntry.fileList
+    };
+
+    if (finalEntry.compressed) {
+      const hash = crypto.createHash('sha1');
+      finalEntry.compressedSize = 0;
+
+      console.log(`Compressing file ${this.curDest.path}...`);
+      await pipeline(
+        fs.createReadStream(`${this.curDest.path}.tmp`),
         zlib.createGzip({ level: 1 }),
         new stream.Transform({
           transform(chunk, _, next) {
             hash.update(chunk);
-            dstEntry.compressedSize += chunk.byteLength;
+            finalEntry.compressedSize += chunk.byteLength;
             next(null, chunk);
           },
         }),
-        fs.createWriteStream(filePath),
+        fs.createWriteStream(this.curDest.path),
       );
-      dstEntry.compressedSha1 = hash.digest("hex");
-      fs.rmSync(`${filePath}.tmp`);
+      finalEntry.compressedSha1 = hash.digest("hex");
+      fs.rmSync(`${this.curDest.path}.tmp`);
     } else {
-      fs.renameSync(`${filePath}.tmp`, filePath);
+      fs.renameSync(`${this.curDest.path}.tmp`, this.curDest.path);
     }
 
     this.result.totalSize += dstEntry.size;
     this.result.compressedSize += dstEntry.compressedSize ?? dstEntry.size;
-    this.result.fileList.push(Object.assign({}, dstEntry));
+    this.result.fileList.push(finalEntry);
+
+    this.curDest = this.initCurDst();
+  }
+
+  get currentPartNumber() {
+    return (this.result.fileList.length + 1).toString().padStart(3, '0');
+  }
+
+  private initCurDst() {
+    const dstName = this.options.outputNameFormat.replace('%d', this.currentPartNumber);
+    const dstPath = path.join(this.dstDir, dstName);
+
+    return {
+      name: dstName,
+      path: dstPath,
+      sha1: crypto.createHash('sha1'),
+      size: 0,
+      compressed: this.options.compress,
+      fileList: []
+    };
   }
 }
 
-function* getFilesRecursively(dir: string): Generator<{ file: string; size: number }> {
+function* getFilesRecursively(dir: string): Generator<SourceFile> {
   for (const file of fs.readdirSync(dir)) {
     const filePath = path.join(dir, file);
     const stat = fs.statSync(filePath);
     if (stat && stat.isDirectory()) {
       yield* getFilesRecursively(filePath);
     } else {
-      yield ({ file: filePath, size: stat.size });
+      yield ({ path: filePath, size: stat.size });
     }
   }
 }
 
-export function packDir(srcDir: string, dstDir: string, options?: PackingOptions): Promise<PackingResult> {
-  const packer = new FilePacker(options);
-  return packer.pack(srcDir, dstDir);
+export function packDir(
+  srcDir: string,
+  dstDir: string,
+  options: Partial<PackingOptions> = defaultOptions
+): Promise<PackingResult> {
+  const packer = new FilePacker(srcDir, dstDir, options);
+  return packer.pack();
 }
